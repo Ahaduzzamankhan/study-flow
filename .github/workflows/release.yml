@@ -4,14 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (e.g. 1.0.0)'
+        description: 'Release version (e.g. 1.0.0)'
         required: false
         default: ''
+
       publish_release:
-        description: 'Publish a GitHub release with the installer (creates the v* tag if missing)'
+        description: 'Publish a GitHub Release and create the version tag if missing'
         type: boolean
         required: false
         default: false
@@ -19,134 +21,392 @@ on:
 permissions:
   contents: write
 
+# Prevent two releases from modifying the same release assets simultaneously.
 concurrency:
-  group: release-${{ github.ref }}
+  group: studyflow-release
   cancel-in-progress: false
 
 jobs:
   windows-release:
-    name: Build and release Windows installer
+    name: Build Windows Installer
     runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Node.js LTS
+    env:
+      npm_config_msvs_version: '2022'
+      GYP_MSVS_VERSION: '2022'
+
+    steps:
+      # --------------------------------------------------
+      # 1. Checkout
+      # --------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --------------------------------------------------
+      # 2. Configure Visual C++ build environment
+      # --------------------------------------------------
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify C++ build tools
+        shell: pwsh
+        run: |
+          Write-Host "Checking Visual C++ compiler..."
+          where.exe cl.exe
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSVC compiler (cl.exe) is unavailable."
+          }
+
+          Write-Host "Checking Windows SDK..."
+          if (-not $env:WindowsSdkDir) {
+            Write-Warning "WindowsSdkDir is not set."
+          }
+
+          Write-Host "MSVC environment is configured."
+
+      # --------------------------------------------------
+      # 3. Setup Node.js
+      # --------------------------------------------------
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
 
+      - name: Display build environment
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+          python --version
+          npm config get msvs_version
+
+      # --------------------------------------------------
+      # 4. Resolve release version
+      # --------------------------------------------------
       - name: Resolve version
         id: version
         shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if ("${{ github.event_name }}" -eq "push") {
-            $version = "${{ github.ref_name }}" -replace '^v', ''
-          } elseif ("${{ github.event.inputs.version }}" -ne "") {
-            $version = "${{ github.event.inputs.version }}"
-          } else {
-            $version = (Get-Content package.json | ConvertFrom-Json).version
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "Building StudyFlow $version"
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $version = ""
 
+          if ($env:EVENT_NAME -eq "push") {
+            $version = $env:REF_NAME -replace '^v', ''
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_VERSION)) {
+            $version = $env:INPUT_VERSION.Trim() -replace '^v', ''
+          }
+          else {
+            $version = $package.version
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release version: $version"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+          Write-Host "=================================="
+          Write-Host "StudyFlow Release: $version"
+          Write-Host "=================================="
+
+      # --------------------------------------------------
+      # 5. Install dependencies
+      # --------------------------------------------------
       - name: Install dependencies
         run: npm ci
 
+      - name: Synchronize package version
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+
+          npm version $version --no-git-tag-version --allow-same-version --ignore-scripts
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to synchronize package version."
+          }
+
+      # --------------------------------------------------
+      # 6. Verify native dependency
+      # --------------------------------------------------
+      - name: Check better-sqlite3
+        shell: pwsh
+        run: |
+          npm ls better-sqlite3
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "better-sqlite3 dependency verification failed."
+          }
+
+          node -e "require('better-sqlite3'); console.log('better-sqlite3 loaded successfully')"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "better-sqlite3 native module could not be loaded."
+          }
+
+      # --------------------------------------------------
+      # 7. Quality checks
+      # --------------------------------------------------
       - name: Type check
         run: npm run typecheck
 
-      - name: Unit tests
+      - name: Run unit tests
         run: npm test
 
+      # --------------------------------------------------
+      # 8. Build application
+      # --------------------------------------------------
       - name: Build renderer and main process
         run: npm run build
 
+      # --------------------------------------------------
+      # 9. Package Electron application
+      # --------------------------------------------------
       - name: Package Electron application
-        run: npx electron-builder --win --dir --publish never
+        run: npx electron-builder --win --x64 --dir --publish never
 
+      # --------------------------------------------------
+      # 10. Verify packaged application
+      # --------------------------------------------------
       - name: Verify packaged application
         shell: pwsh
         run: |
-          if (-not (Test-Path "release/win-unpacked/StudyFlow.exe")) {
-            throw "Packaged application missing at release/win-unpacked/StudyFlow.exe"
-          }
-          if (-not (Test-Path "release/win-unpacked/resources/app.asar")) {
-            throw "Packaged app.asar missing"
+          $appPath = "release/win-unpacked"
+
+          $requiredFiles = @(
+            "$appPath/StudyFlow.exe",
+            "$appPath/resources/app.asar"
+          )
+
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file)) {
+              throw "Required packaged file missing: $file"
+            }
+
+            Write-Host "Verified: $file"
           }
 
+          Write-Host "Electron package verification successful."
+
+      # --------------------------------------------------
+      # 11. Install Inno Setup
+      # --------------------------------------------------
       - name: Ensure Inno Setup
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            choco install innosetup --no-progress -y
-          }
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after install" }
-          Write-Host "Using $iscc"
 
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Installing Inno Setup..."
+
+            choco install innosetup --no-progress -y
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Inno Setup installation failed."
+            }
+          }
+
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe was not found."
+          }
+
+          Write-Host "Inno Setup is ready."
+
+      # --------------------------------------------------
+      # 12. Compile installer
+      # --------------------------------------------------
       - name: Compile Inno Setup installer
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "/DAppVersion=$version" "installer\studyflow.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
-          if (-not (Test-Path "release/StudyFlow-Setup-$version.exe")) {
-            throw "Installer was not produced"
+
+          if (-not (Test-Path "installer/studyflow.iss")) {
+            throw "installer/studyflow.iss was not found."
           }
 
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+
+          & $iscc "/DAppVersion=$version" "installer/studyflow.iss"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed."
+          }
+
+          $installer = "release/StudyFlow-Setup-$version.exe"
+
+          if (-not (Test-Path $installer)) {
+            throw "Installer was not generated: $installer"
+          }
+
+          Write-Host "Installer created successfully."
+
+      # --------------------------------------------------
+      # 13. Create portable ZIP
+      # --------------------------------------------------
       - name: Create portable archive
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          Compress-Archive -Path "release/win-unpacked/*" -DestinationPath "release/StudyFlow-Portable-$version.zip" -CompressionLevel Optimal
+          $source = "release/win-unpacked"
+          $destination = "release/StudyFlow-Portable-$version.zip"
 
-      - name: Generate checksums
+          if (-not (Test-Path $source)) {
+            throw "Portable application directory is missing."
+          }
+
+          Compress-Archive `
+            -Path "$source/*" `
+            -DestinationPath $destination `
+            -CompressionLevel Optimal `
+            -Force
+
+          if (-not (Test-Path $destination)) {
+            throw "Portable archive was not generated."
+          }
+
+          Write-Host "Portable archive created successfully."
+
+      # --------------------------------------------------
+      # 14. Generate SHA256 checksums
+      # --------------------------------------------------
+      - name: Generate SHA256 checksums
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $lines = @(
-            (Get-FileHash "release/StudyFlow-Setup-$version.exe" -Algorithm SHA256).Hash + "  StudyFlow-Setup-$version.exe",
-            (Get-FileHash "release/StudyFlow-Portable-$version.zip" -Algorithm SHA256).Hash + "  StudyFlow-Portable-$version.zip"
-          )
-          $lines | Out-File -Encoding ascii "release/StudyFlow-SHA256SUMS.txt"
 
+          $files = @(
+            "release/StudyFlow-Setup-$version.exe",
+            "release/StudyFlow-Portable-$version.zip"
+          )
+
+          $lines = foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+              throw "Cannot checksum missing file: $file"
+            }
+
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash
+            $filename = Split-Path $file -Leaf
+
+            "$hash  $filename"
+          }
+
+          $lines | Out-File `
+            -Encoding ascii `
+            "release/StudyFlow-SHA256SUMS.txt"
+
+          Get-Content "release/StudyFlow-SHA256SUMS.txt"
+
+      # --------------------------------------------------
+      # 15. Final artifact verification
+      # --------------------------------------------------
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+
+          $files = @(
+            "release/StudyFlow-Setup-$version.exe",
+            "release/StudyFlow-Portable-$version.zip",
+            "release/StudyFlow-SHA256SUMS.txt"
+          )
+
+          foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+              throw "Release artifact missing: $file"
+            }
+
+            $size = (Get-Item $file).Length / 1MB
+            Write-Host "$file ($([math]::Round($size, 2)) MB)"
+          }
+
+      # --------------------------------------------------
+      # 16. Upload GitHub Actions artifacts
+      # --------------------------------------------------
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: studyflow-windows
+          name: StudyFlow-Windows-${{ steps.version.outputs.version }}
           path: |
-            release/StudyFlow-Setup-*.exe
-            release/StudyFlow-Portable-*.zip
+            release/StudyFlow-Setup-${{ steps.version.outputs.version }}.exe
+            release/StudyFlow-Portable-${{ steps.version.outputs.version }}.zip
             release/StudyFlow-SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
 
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+      # --------------------------------------------------
+      # 17. Publish GitHub Release
+      # --------------------------------------------------
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' || inputs.publish_release == true
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+          tag_name: v${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           name: StudyFlow ${{ steps.version.outputs.version }}
           generate_release_notes: true
           draft: false
           prerelease: false
+
           files: |
-            release/StudyFlow-Setup-*.exe
-            release/StudyFlow-Portable-*.zip
+            release/StudyFlow-Setup-${{ steps.version.outputs.version }}.exe
+            release/StudyFlow-Portable-${{ steps.version.outputs.version }}.zip
             release/StudyFlow-SHA256SUMS.txt
+
           body: |
             ## StudyFlow ${{ steps.version.outputs.version }}
 
-            Offline desktop study manager: Pomodoro timer, session tracking, subjects, tasks, goals, habits, notes, achievements and analytics.
+            An offline desktop study management application for Windows.
 
-            ### Install (Windows 10/11, x64)
+            ### Features
+
+            - Pomodoro study timer
+            - Study session tracking
+            - Daily and weekly study analytics
+            - Subjects and task management
+            - Study goals and habits
+            - Notes and achievements
+            - Productivity statistics
+
+            ### Windows Installation
+
+            **System requirements**
+            - Windows 10 or Windows 11
+            - 64-bit processor
+            - x64 architecture
+
+            **Installer**
+
             1. Download `StudyFlow-Setup-${{ steps.version.outputs.version }}.exe`.
-            2. Run it and choose an install directory.
-            3. Launch StudyFlow from the Start Menu or desktop shortcut.
+            2. Run the installer.
+            3. Follow the installation instructions.
+            4. Launch StudyFlow from the Start Menu.
 
-            The installer is compiled with Inno Setup. A portable build (`StudyFlow-Portable-${{ steps.version.outputs.version }}.zip`) is also attached.
-            Verify downloads with `StudyFlow-SHA256SUMS.txt`.
+            **Portable version**
 
-            Your study history is stored locally in `%APPDATA%\StudyFlow` and is preserved across upgrades and uninstall.
+            Download `StudyFlow-Portable-${{ steps.version.outputs.version }}.zip`, extract it, and run `StudyFlow.exe`.
+
+            ### Verify Downloads
+
+            SHA256 checksums are available in `StudyFlow-SHA256SUMS.txt`.
+
+            ### Data Storage
+
+            StudyFlow stores application data locally. Confirm the application's actual database location and uninstall behavior before relying on data preservation.
+
+            ---
+
+            **StudyFlow ${{ steps.version.outputs.version }}**
+            Built with Electron.
