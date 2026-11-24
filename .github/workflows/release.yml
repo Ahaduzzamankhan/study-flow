@@ -75,7 +75,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Display build environment
@@ -169,6 +169,30 @@ jobs:
       # --------------------------------------------------
       - name: Build renderer and main process
         run: npm run build
+
+      # --------------------------------------------------
+      # 8b. Rebuild the native SQLite module for Electron
+      # --------------------------------------------------
+      - name: Rebuild native module for Electron
+        shell: pwsh
+        run: |
+          $electronVersion = node -p "require('electron/package.json').version"
+          Write-Host "Rebuilding better-sqlite3 for Electron $electronVersion"
+
+          $env:npm_config_runtime = "electron"
+          $env:npm_config_target = $electronVersion
+          $env:npm_config_disturl = "https://electronjs.org/headers"
+          $env:npm_config_build_from_source = "false"
+
+          npm rebuild better-sqlite3
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "better-sqlite3 rebuild for Electron failed."
+          }
+
+          if (-not (Test-Path "node_modules/better-sqlite3/build/Release/better_sqlite3.node")) {
+            throw "better-sqlite3 native binary missing after rebuild."
+          }
 
       # --------------------------------------------------
       # 9. Package Electron application
