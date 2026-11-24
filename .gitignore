@@ -1,0 +1,11 @@
+node_modules/
+.claude/
+dist/
+dist-electron/
+release/
+coverage/
+*.local
+*.log
+.DS_Store
+Thumbs.db
+.vite/

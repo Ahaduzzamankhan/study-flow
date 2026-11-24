@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="StudyFlow icon: an open study book with a clock and a sparkle">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#C7B8FF"/>
+      <stop offset="55%" stop-color="#A99CF8"/>
+      <stop offset="100%" stop-color="#8FC8F8"/>
+    </linearGradient>
+    <linearGradient id="pageL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFDF8"/>
+      <stop offset="100%" stop-color="#F4EBDD"/>
+    </linearGradient>
+    <linearGradient id="pageR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#EFE3D2"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFE9A8"/>
+      <stop offset="100%" stop-color="#FFC2DE"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bg)"/>
+  <circle cx="404" cy="104" r="66" fill="#FFFFFF" opacity="0.18"/>
+  <circle cx="112" cy="420" r="84" fill="#FFFFFF" opacity="0.12"/>
+
+  <!-- open book -->
+  <path d="M256 168c-34-25-79-38-134-38-11 0-20 9-20 20v198c0 11 9 20 20 20 55 0 100 13 134 38V168z" fill="url(#pageL)"/>
+  <path d="M256 168c34-25 79-38 134-38 11 0 20 9 20 20v198c0 11-9 20-20 20-55 0-100 13-134 38V168z" fill="url(#pageR)"/>
+  <path d="M256 168v238" stroke="#D9C9B4" stroke-width="10" stroke-linecap="round"/>
+  <path d="M102 130v198c0 11 9 20 20 20 55 0 100 13 134 38V168c-34-25-79-38-134-38-11 0-20 9-20 20z" fill="none" stroke="#6D5BD0" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M410 130v198c0 11-9 20-20 20-55 0-100 13-134 38V168c34-25 79-38 134-38 11 0 20 9 20 20z" fill="none" stroke="#6D5BD0" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M138 210h72M138 258h72M138 306h48" stroke="#B9A9F2" stroke-width="14" stroke-linecap="round"/>
+  <path d="M302 210h72M302 258h60" stroke="#B9A9F2" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- clock -->
+  <circle cx="352" cy="352" r="104" fill="#2E2A52"/>
+  <circle cx="352" cy="352" r="88" fill="#FFFDF8"/>
+  <path d="M352 300v56l38 22" stroke="#6D5BD0" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="352" cy="352" r="10" fill="#2E2A52"/>
+  <path d="M352 268v14M352 422v14M268 352h14M422 352h14" stroke="#A99CF8" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- sparkle -->
+  <path d="M118 118c6 26 16 36 42 42-26 6-36 16-42 42-6-26-16-36-42-42 26-6 36-16 42-42z" fill="url(#spark)"/>
+  <path d="M170 232c3 13 8 18 21 21-13 3-18 8-21 21-3-13-8-18-21-21 13-3 18-8 21-21z" fill="#FFFFFF" opacity="0.85"/>
+</svg>

@@ -1,0 +1,27 @@
+appId: com.studyflow.desktop
+productName: StudyFlow
+copyright: Copyright © 2026 StudyFlow
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - '!**/*.map'
+extraMetadata:
+  main: dist-electron/electron/main.js
+asar: true
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+  - from: build/icon.ico
+    to: icon.ico
+win:
+  icon: build/icon.ico
+  target:
+    - target: dir
+      arch:
+        - x64
+  artifactName: StudyFlow-${version}-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
